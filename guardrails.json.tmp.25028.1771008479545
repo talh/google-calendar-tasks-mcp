@@ -1,0 +1,7 @@
+{
+  "dailyWriteLimit": 50,
+  "pastEventProtectionDays": 7,
+  "protectedCalendars": [],
+  "protectedTaskLists": [],
+  "allowRecurringSeriesDelete": false
+}
