@@ -7,8 +7,8 @@ import { loadGuardrails } from "./guardrails.js";
 import { createAuditLogger } from "./audit.js";
 import { errorResult } from "./types.js";
 import * as cal from "./calendar.js";
+import * as tasks from "./tasks.js";
 import type { GuardrailContext } from "./guardrails.js";
-import { successResult } from "./types.js";
 
 const config = loadConfig();
 
@@ -159,7 +159,7 @@ server.tool(
 );
 
 // ============================================================
-// Task Tools (stubs — will be replaced in Phase 4)
+// Task Tools
 // ============================================================
 
 server.tool(
@@ -169,7 +169,7 @@ server.tool(
   async () => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult([]);
+    return tasks.listTaskLists(googleClient!);
   },
 );
 
@@ -181,10 +181,10 @@ server.tool(
     showCompleted: z.boolean().optional().default(false).describe("Include completed tasks"),
     maxResults: z.number().int().min(1).max(100).optional().default(100).describe("Max tasks to return"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult([]);
+    return tasks.listTasks(params, googleClient!);
   },
 );
 
@@ -195,10 +195,10 @@ server.tool(
     taskListId: z.string().describe("Task list ID"),
     taskId: z.string().describe("Google task ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.getTask(params, googleClient!);
   },
 );
 
@@ -211,10 +211,10 @@ server.tool(
     due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Due date in YYYY-MM-DD"),
     notes: z.string().optional().describe("Task notes/description"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.createTask(params, googleClient!, guardrails, audit);
   },
 );
 
@@ -229,10 +229,10 @@ server.tool(
     notes: z.string().optional().describe("New notes"),
     status: z.enum(["needsAction", "completed"]).optional().describe("Task status"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.updateTask(params, googleClient!, guardrails, audit);
   },
 );
 
@@ -243,10 +243,10 @@ server.tool(
     taskListId: z.string().describe("Task list ID"),
     taskId: z.string().describe("Google task ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.deleteTask(params, googleClient!, guardrails, audit);
   },
 );
 
@@ -257,10 +257,10 @@ server.tool(
     taskListId: z.string().describe("Task list ID"),
     taskId: z.string().describe("Google task ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.completeTask(params, googleClient!, guardrails, audit);
   },
 );
 
@@ -272,10 +272,10 @@ server.tool(
     taskId: z.string().describe("Google task ID"),
     destinationListId: z.string().describe("Destination task list ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return tasks.moveTask(params, googleClient!, guardrails, audit);
   },
 );
 
