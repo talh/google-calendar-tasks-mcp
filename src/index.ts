@@ -4,10 +4,11 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { loadCredentials, createGoogleClient } from "./auth.js";
 import { loadGuardrails } from "./guardrails.js";
-import { successResult, errorResult } from "./types.js";
+import { createAuditLogger } from "./audit.js";
+import { errorResult } from "./types.js";
+import * as cal from "./calendar.js";
 import type { GuardrailContext } from "./guardrails.js";
-import type { OAuth2Client } from "google-auth-library";
-import type { ServerConfig } from "./config.js";
+import { successResult } from "./types.js";
 
 const config = loadConfig();
 
@@ -36,6 +37,8 @@ try {
     allowRecurringSeriesDelete: false,
   });
 }
+
+const audit = createAuditLogger(config.auditLogDir);
 
 if (!googleClient) {
   console.error(
@@ -67,11 +70,7 @@ server.tool(
   async () => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-
-    // Stub — will be replaced in Phase 3
-    return successResult([
-      { id: "primary", name: "Primary Calendar", primary: true, accessRole: "owner" },
-    ]);
+    return cal.listCalendars(googleClient!);
   },
 );
 
@@ -85,10 +84,10 @@ server.tool(
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Range end in YYYY-MM-DD"),
     maxResults: z.number().int().min(1).max(250).optional().default(50).describe("Max events to return"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult([]);
+    return cal.listEvents(params, googleClient!, config);
   },
 );
 
@@ -99,10 +98,10 @@ server.tool(
     calendarId: z.string().optional().default("primary").describe("Calendar ID. Defaults to primary"),
     eventId: z.string().describe("Google event ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return cal.getEvent(params, googleClient!, config);
   },
 );
 
@@ -118,10 +117,10 @@ server.tool(
     location: z.string().optional().describe("Event location"),
     description: z.string().optional().describe("Event description"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return cal.createEvent(params, googleClient!, config, guardrails, audit);
   },
 );
 
@@ -138,10 +137,10 @@ server.tool(
     location: z.string().optional().describe("New location"),
     description: z.string().optional().describe("New description"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return cal.updateEvent(params, googleClient!, config, guardrails, audit);
   },
 );
 
@@ -152,15 +151,15 @@ server.tool(
     calendarId: z.string().optional().default("primary").describe("Calendar ID. Defaults to primary"),
     eventId: z.string().describe("Google event ID"),
   },
-  async () => {
+  async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return successResult({});
+    return cal.deleteEvent(params, googleClient!, guardrails, audit);
   },
 );
 
 // ============================================================
-// Task Tools
+// Task Tools (stubs — will be replaced in Phase 4)
 // ============================================================
 
 server.tool(
