@@ -1,5 +1,4 @@
-import { google, type calendar_v3 } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
+import type { calendar_v3 } from "googleapis";
 import type { ServerConfig } from "./config.js";
 import type { GuardrailContext } from "./guardrails.js";
 import type { AuditLogger } from "./audit.js";
@@ -9,6 +8,18 @@ import { GuardrailError, apiError } from "./errors.js";
 // ============================================================
 // Types
 // ============================================================
+
+/** The subset of google.calendar("v3") we actually use */
+export interface CalendarApi {
+  calendarList: { list: (params?: any) => Promise<{ data: any }> };
+  events: {
+    list: (params: any) => Promise<{ data: any }>;
+    get: (params: any) => Promise<{ data: any }>;
+    insert: (params: any) => Promise<{ data: any }>;
+    patch: (params: any) => Promise<{ data: any }>;
+    delete: (params: any) => Promise<any>;
+  };
+}
 
 export interface ListEventsParams {
   calendarId: string;
@@ -60,7 +71,6 @@ function extractDate(dateTime: string | null | undefined): string | undefined {
 
 function extractTime(dateTime: string | null | undefined): string | undefined {
   if (!dateTime) return undefined;
-  // dateTime is like "2026-02-13T10:00:00+02:00" or "2026-02-13T10:00:00Z"
   const match = dateTime.match(/T(\d{2}:\d{2})/);
   return match ? match[1] : undefined;
 }
@@ -125,14 +135,7 @@ async function withErrorHandling(
 // Date helpers
 // ============================================================
 
-/**
- * Given a YYYY-MM-DD date and a timezone, return the start-of-day and
- * end-of-day as ISO strings suitable for Google Calendar API timeMin/timeMax.
- */
-function dayBounds(date: string, timezone: string) {
-  // Build an Intl formatter for the target timezone so we compute the
-  // correct UTC offset. For the API we pass timeZone directly, so we
-  // just need ISO-ish strings with the date.
+function dayBounds(date: string, _timezone: string) {
   return {
     timeMin: `${date}T00:00:00`,
     timeMax: `${date}T23:59:59`,
@@ -144,13 +147,12 @@ function dayBounds(date: string, timezone: string) {
 // ============================================================
 
 export async function listCalendars(
-  client: OAuth2Client,
+  api: CalendarApi,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
-    const cal = google.calendar({ version: "v3", auth: client });
-    const { data } = await cal.calendarList.list();
+    const { data } = await api.calendarList.list();
 
-    const calendars = (data.items ?? []).map((c) => ({
+    const calendars = (data.items ?? []).map((c: any) => ({
       id: c.id,
       name: c.summary,
       primary: c.primary ?? false,
@@ -163,7 +165,7 @@ export async function listCalendars(
 
 export async function listEvents(
   params: ListEventsParams,
-  client: OAuth2Client,
+  api: CalendarApi,
   config: ServerConfig,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
@@ -174,8 +176,6 @@ export async function listEvents(
         message: "Provide either 'date' or both 'startDate' and 'endDate'",
       });
     }
-
-    const cal = google.calendar({ version: "v3", auth: client });
 
     let timeMin: string;
     let timeMax: string;
@@ -189,7 +189,7 @@ export async function listEvents(
       timeMax = `${params.endDate}T23:59:59`;
     }
 
-    const { data } = await cal.events.list({
+    const { data } = await api.events.list({
       calendarId: params.calendarId,
       timeMin,
       timeMax,
@@ -206,12 +206,11 @@ export async function listEvents(
 
 export async function getEvent(
   params: GetEventParams,
-  client: OAuth2Client,
+  api: CalendarApi,
   config: ServerConfig,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
-    const cal = google.calendar({ version: "v3", auth: client });
-    const { data } = await cal.events.get({
+    const { data } = await api.events.get({
       calendarId: params.calendarId,
       eventId: params.eventId,
       timeZone: config.timezone,
@@ -222,7 +221,7 @@ export async function getEvent(
 
 export async function createEvent(
   params: CreateEventParams,
-  client: OAuth2Client,
+  api: CalendarApi,
   config: ServerConfig,
   guardrails: GuardrailContext,
   audit: AuditLogger,
@@ -231,9 +230,7 @@ export async function createEvent(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedCalendar(params.calendarId);
 
-    const cal = google.calendar({ version: "v3", auth: client });
-
-    const eventBody: calendar_v3.Schema$Event = {
+    const eventBody = {
       summary: params.title,
       start: {
         dateTime: `${params.date}T${params.startTime}:00`,
@@ -247,7 +244,7 @@ export async function createEvent(
       description: params.description,
     };
 
-    const { data } = await cal.events.insert({
+    const { data } = await api.events.insert({
       calendarId: params.calendarId,
       requestBody: eventBody,
     });
@@ -278,7 +275,7 @@ export async function createEvent(
 
 export async function updateEvent(
   params: UpdateEventParams,
-  client: OAuth2Client,
+  api: CalendarApi,
   config: ServerConfig,
   guardrails: GuardrailContext,
   audit: AuditLogger,
@@ -287,10 +284,8 @@ export async function updateEvent(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedCalendar(params.calendarId);
 
-    const cal = google.calendar({ version: "v3", auth: client });
-
     // Fetch existing event for past-event protection check
-    const { data: existing } = await cal.events.get({
+    const { data: existing } = await api.events.get({
       calendarId: params.calendarId,
       eventId: params.eventId,
     });
@@ -301,7 +296,7 @@ export async function updateEvent(
     }
 
     // Build patch with only provided fields
-    const patch: calendar_v3.Schema$Event = {};
+    const patch: Record<string, any> = {};
     const changes: Record<string, unknown> = {};
 
     if (params.title !== undefined) {
@@ -340,7 +335,7 @@ export async function updateEvent(
       changes.description = params.description;
     }
 
-    const { data } = await cal.events.patch({
+    const { data } = await api.events.patch({
       calendarId: params.calendarId,
       eventId: params.eventId,
       requestBody: patch,
@@ -373,7 +368,7 @@ export async function updateEvent(
 
 export async function deleteEvent(
   params: DeleteEventParams,
-  client: OAuth2Client,
+  api: CalendarApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -381,10 +376,8 @@ export async function deleteEvent(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedCalendar(params.calendarId);
 
-    const cal = google.calendar({ version: "v3", auth: client });
-
     // Fetch existing event for guardrail checks and audit title
-    const { data: existing } = await cal.events.get({
+    const { data: existing } = await api.events.get({
       calendarId: params.calendarId,
       eventId: params.eventId,
     });
@@ -399,7 +392,7 @@ export async function deleteEvent(
       recurringEventId: existing.recurringEventId ?? undefined,
     });
 
-    await cal.events.delete({
+    await api.events.delete({
       calendarId: params.calendarId,
       eventId: params.eventId,
     });

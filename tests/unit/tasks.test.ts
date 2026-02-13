@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   transformTask,
+  listTaskLists,
+  listTasks,
+  getTask,
   createTask,
   updateTask,
   deleteTask,
@@ -9,6 +12,7 @@ import {
 } from "../../src/tasks.js";
 import { GuardrailContext } from "../../src/guardrails.js";
 import type { AuditLogger } from "../../src/audit.js";
+import { createMockTasksClient, resetMockState } from "../../src/test-mocks.js";
 
 // ============================================================
 // transformTask
@@ -287,5 +291,155 @@ describe("moveTask", () => {
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.code).toBe("PROTECTED_RESOURCE");
+  });
+});
+
+// ============================================================
+// Happy-path tests using mock clients
+// ============================================================
+
+describe("listTaskLists (mock)", () => {
+  it("returns task lists", async () => {
+    const api = createMockTasksClient();
+    const result = await listTaskLists(api);
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].title).toBe("My Tasks");
+    expect(parsed[1].title).toBe("Work Tasks");
+  });
+});
+
+describe("listTasks (mock)", () => {
+  it("returns tasks with transformed due dates", async () => {
+    const api = createMockTasksClient();
+    const result = await listTasks(
+      { showCompleted: true, maxResults: 100 },
+      api,
+    );
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.length).toBeGreaterThanOrEqual(2);
+    expect(parsed[0].title).toBe("Buy groceries");
+    expect(parsed[0].due).toBe("2026-02-15");
+  });
+});
+
+describe("getTask (mock)", () => {
+  it("returns a single task", async () => {
+    const api = createMockTasksClient();
+    const result = await getTask(
+      { taskListId: "@default", taskId: "task_mock_1" },
+      api,
+    );
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toBe("task_mock_1");
+    expect(parsed.title).toBe("Mock Task");
+  });
+});
+
+describe("createTask (mock)", () => {
+  it("creates a task and returns id", async () => {
+    resetMockState();
+    const api = createMockTasksClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await createTask(
+      { title: "New Task", due: "2026-02-20", notes: "Some notes" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toMatch(/^task_mock_/);
+    expect(parsed.title).toBe("New Task");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateTask (mock)", () => {
+  it("updates a task title", async () => {
+    const api = createMockTasksClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await updateTask(
+      { taskListId: "@default", taskId: "task_mock_1", title: "Renamed Task" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.title).toBe("Renamed Task");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("deleteTask (mock)", () => {
+  it("deletes a task and returns title", async () => {
+    const api = createMockTasksClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await deleteTask(
+      { taskListId: "@default", taskId: "task_mock_1" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.success).toBe(true);
+    expect(parsed.deletedTitle).toBe("Mock Task");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("completeTask (mock)", () => {
+  it("marks a task as completed", async () => {
+    const api = createMockTasksClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await completeTask(
+      { taskListId: "@default", taskId: "task_mock_1" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.status).toBe("completed");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("moveTask (mock)", () => {
+  it("moves a task between lists", async () => {
+    resetMockState();
+    const api = createMockTasksClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await moveTask(
+      { sourceListId: "list_default", taskId: "task_mock_1", destinationListId: "list_work" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toMatch(/^task_mock_/);
+    expect(parsed.newListId).toBe("list_work");
+    expect(audit.log).toHaveBeenCalledTimes(1);
   });
 });

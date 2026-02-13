@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { transformEvent, listEvents, createEvent, updateEvent, deleteEvent } from "../../src/calendar.js";
+import { transformEvent, listCalendars, listEvents, getEvent, createEvent, updateEvent, deleteEvent } from "../../src/calendar.js";
 import { GuardrailContext } from "../../src/guardrails.js";
 import type { AuditLogger } from "../../src/audit.js";
 import type { ServerConfig } from "../../src/config.js";
+import { createMockCalendarClient, resetMockState } from "../../src/test-mocks.js";
 
 // ============================================================
 // transformEvent
@@ -264,5 +265,135 @@ describe("deleteEvent", () => {
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.code).toBe("PROTECTED_RESOURCE");
+  });
+});
+
+// ============================================================
+// Happy-path tests using mock clients
+// ============================================================
+
+describe("listCalendars (mock)", () => {
+  it("returns calendar list from mock", async () => {
+    const api = createMockCalendarClient();
+    const result = await listCalendars(api);
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].id).toBe("primary");
+    expect(parsed[1].name).toBe("Work Calendar");
+  });
+});
+
+describe("listEvents (mock)", () => {
+  it("returns events for a single date", async () => {
+    const api = createMockCalendarClient();
+    const result = await listEvents(
+      { calendarId: "primary", date: "2026-02-13", maxResults: 50 },
+      api,
+      mockConfig(),
+    );
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.length).toBeGreaterThanOrEqual(2);
+    expect(parsed[0].title).toBe("Morning Standup");
+    expect(parsed[1].isAllDay).toBe(true);
+  });
+
+  it("returns events for a date range", async () => {
+    const api = createMockCalendarClient();
+    const result = await listEvents(
+      { calendarId: "primary", startDate: "2026-02-13", endDate: "2026-02-14", maxResults: 50 },
+      api,
+      mockConfig(),
+    );
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("getEvent (mock)", () => {
+  it("returns a single event", async () => {
+    const api = createMockCalendarClient();
+    const result = await getEvent(
+      { calendarId: "primary", eventId: "evt_mock_1" },
+      api,
+      mockConfig(),
+    );
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toBe("evt_mock_1");
+    expect(parsed.title).toBe("Mock Event");
+  });
+});
+
+describe("createEvent (mock)", () => {
+  it("creates an event and returns id", async () => {
+    resetMockState();
+    const api = createMockCalendarClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await createEvent(
+      {
+        calendarId: "primary",
+        title: "New Meeting",
+        date: "2026-02-15",
+        startTime: "14:00",
+        endTime: "15:00",
+      },
+      api,
+      mockConfig(),
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toMatch(/^evt_mock_/);
+    expect(parsed.title).toBe("New Meeting");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateEvent (mock)", () => {
+  it("updates an event title", async () => {
+    const api = createMockCalendarClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await updateEvent(
+      { calendarId: "primary", eventId: "evt_mock_1", title: "Renamed" },
+      api,
+      mockConfig(),
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.title).toBe("Renamed");
+    expect(audit.log).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("deleteEvent (mock)", () => {
+  it("deletes an event and returns title", async () => {
+    const api = createMockCalendarClient();
+    const guardrails = mockGuardrails();
+    const audit = noopAudit();
+
+    const result = await deleteEvent(
+      { calendarId: "primary", eventId: "evt_mock_1" },
+      api,
+      guardrails,
+      audit,
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.success).toBe(true);
+    expect(parsed.deletedTitle).toBe("Mock Event");
+    expect(audit.log).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,3 @@
-import { google, type tasks_v1 } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
 import type { GuardrailContext } from "./guardrails.js";
 import type { AuditLogger } from "./audit.js";
 import { successResult, errorResult, type ToolResult } from "./types.js";
@@ -8,6 +6,18 @@ import { GuardrailError, apiError } from "./errors.js";
 // ============================================================
 // Types
 // ============================================================
+
+/** The subset of google.tasks("v1") we actually use */
+export interface TasksApi {
+  tasklists: { list: (params?: any) => Promise<{ data: any }> };
+  tasks: {
+    list: (params: any) => Promise<{ data: any }>;
+    get: (params: any) => Promise<{ data: any }>;
+    insert: (params: any) => Promise<{ data: any }>;
+    patch: (params: any) => Promise<{ data: any }>;
+    delete: (params: any) => Promise<any>;
+  };
+}
 
 export interface ListTasksParams {
   taskListId?: string;
@@ -56,7 +66,7 @@ export interface MoveTaskParams {
 // Response transformation
 // ============================================================
 
-export function transformTask(task: tasks_v1.Schema$Task) {
+export function transformTask(task: { id?: string | null; title?: string | null; status?: string | null; due?: string | null; notes?: string | null; updated?: string | null }) {
   return {
     id: task.id,
     title: task.title ?? "(no title)",
@@ -105,7 +115,6 @@ async function withErrorHandling(
 // Helpers
 // ============================================================
 
-/** Google Tasks API expects RFC 3339 dates. Convert YYYY-MM-DD to that. */
 function toRfc3339Date(date: string): string {
   return `${date}T00:00:00.000Z`;
 }
@@ -119,13 +128,12 @@ function resolveListId(taskListId?: string): string {
 // ============================================================
 
 export async function listTaskLists(
-  client: OAuth2Client,
+  api: TasksApi,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-    const { data } = await tasksApi.tasklists.list();
+    const { data } = await api.tasklists.list();
 
-    const lists = (data.items ?? []).map((l) => ({
+    const lists = (data.items ?? []).map((l: any) => ({
       id: l.id,
       title: l.title,
     }));
@@ -136,11 +144,10 @@ export async function listTaskLists(
 
 export async function listTasks(
   params: ListTasksParams,
-  client: OAuth2Client,
+  api: TasksApi,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-    const { data } = await tasksApi.tasks.list({
+    const { data } = await api.tasks.list({
       tasklist: resolveListId(params.taskListId),
       showCompleted: params.showCompleted,
       showHidden: params.showCompleted,
@@ -154,11 +161,10 @@ export async function listTasks(
 
 export async function getTask(
   params: GetTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
 ): Promise<ToolResult> {
   return withErrorHandling(async () => {
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-    const { data } = await tasksApi.tasks.get({
+    const { data } = await api.tasks.get({
       tasklist: params.taskListId,
       task: params.taskId,
     });
@@ -168,7 +174,7 @@ export async function getTask(
 
 export async function createTask(
   params: CreateTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -177,9 +183,7 @@ export async function createTask(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedTaskList(listId);
 
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-
-    const body: tasks_v1.Schema$Task = {
+    const body: Record<string, any> = {
       title: params.title,
     };
     if (params.due) {
@@ -189,7 +193,7 @@ export async function createTask(
       body.notes = params.notes;
     }
 
-    const { data } = await tasksApi.tasks.insert({
+    const { data } = await api.tasks.insert({
       tasklist: listId,
       requestBody: body,
     });
@@ -219,7 +223,7 @@ export async function createTask(
 
 export async function updateTask(
   params: UpdateTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -227,15 +231,13 @@ export async function updateTask(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedTaskList(params.taskListId);
 
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-
     // Fetch existing task for merge
-    const { data: existing } = await tasksApi.tasks.get({
+    const { data: existing } = await api.tasks.get({
       tasklist: params.taskListId,
       task: params.taskId,
     });
 
-    const patch: tasks_v1.Schema$Task = {};
+    const patch: Record<string, any> = {};
     const changes: Record<string, unknown> = {};
 
     if (params.title !== undefined) {
@@ -255,7 +257,7 @@ export async function updateTask(
       changes.status = params.status;
     }
 
-    const { data } = await tasksApi.tasks.patch({
+    const { data } = await api.tasks.patch({
       tasklist: params.taskListId,
       task: params.taskId,
       requestBody: patch,
@@ -288,7 +290,7 @@ export async function updateTask(
 
 export async function deleteTask(
   params: DeleteTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -296,15 +298,13 @@ export async function deleteTask(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedTaskList(params.taskListId);
 
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-
     // Fetch existing task for audit title
-    const { data: existing } = await tasksApi.tasks.get({
+    const { data: existing } = await api.tasks.get({
       tasklist: params.taskListId,
       task: params.taskId,
     });
 
-    await tasksApi.tasks.delete({
+    await api.tasks.delete({
       tasklist: params.taskListId,
       task: params.taskId,
     });
@@ -333,7 +333,7 @@ export async function deleteTask(
 
 export async function completeTask(
   params: CompleteTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -341,9 +341,7 @@ export async function completeTask(
     guardrails.checkWriteLimit(1);
     guardrails.checkProtectedTaskList(params.taskListId);
 
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-
-    const { data } = await tasksApi.tasks.patch({
+    const { data } = await api.tasks.patch({
       tasklist: params.taskListId,
       task: params.taskId,
       requestBody: { status: "completed" },
@@ -374,7 +372,7 @@ export async function completeTask(
 
 export async function moveTask(
   params: MoveTaskParams,
-  client: OAuth2Client,
+  api: TasksApi,
   guardrails: GuardrailContext,
   audit: AuditLogger,
 ): Promise<ToolResult> {
@@ -383,16 +381,14 @@ export async function moveTask(
     guardrails.checkProtectedTaskList(params.sourceListId);
     guardrails.checkProtectedTaskList(params.destinationListId);
 
-    const tasksApi = google.tasks({ version: "v1", auth: client });
-
     // 1. Get the task from source
-    const { data: task } = await tasksApi.tasks.get({
+    const { data: task } = await api.tasks.get({
       tasklist: params.sourceListId,
       task: params.taskId,
     });
 
     // 2. Create in destination
-    const { data: newTask } = await tasksApi.tasks.insert({
+    const { data: newTask } = await api.tasks.insert({
       tasklist: params.destinationListId,
       requestBody: {
         title: task.title,
@@ -403,7 +399,7 @@ export async function moveTask(
     });
 
     // 3. Delete from source
-    await tasksApi.tasks.delete({
+    await api.tasks.delete({
       tasklist: params.sourceListId,
       task: params.taskId,
     });

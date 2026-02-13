@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { google } from "googleapis";
 import { loadConfig } from "./config.js";
 import { loadCredentials, createGoogleClient } from "./auth.js";
 import { loadGuardrails } from "./guardrails.js";
@@ -8,6 +9,8 @@ import { createAuditLogger } from "./audit.js";
 import { errorResult } from "./types.js";
 import * as cal from "./calendar.js";
 import * as tasks from "./tasks.js";
+import type { CalendarApi } from "./calendar.js";
+import type { TasksApi } from "./tasks.js";
 import type { GuardrailContext } from "./guardrails.js";
 
 const config = loadConfig();
@@ -18,10 +21,22 @@ const server = new McpServer({
 });
 
 // Load dependencies
-const creds = await loadCredentials(config.credentialsPath);
-const googleClient = creds
-  ? createGoogleClient(creds, config.credentialsPath)
-  : null;
+let calendarApi: CalendarApi | null = null;
+let tasksApi: TasksApi | null = null;
+
+if (config.testMode) {
+  const { createMockCalendarClient, createMockTasksClient } = await import("./test-mocks.js");
+  calendarApi = createMockCalendarClient();
+  tasksApi = createMockTasksClient();
+  console.error("[mcp] Running in TEST MODE with mock Google APIs");
+} else {
+  const creds = await loadCredentials(config.credentialsPath);
+  if (creds) {
+    const authClient = createGoogleClient(creds, config.credentialsPath);
+    calendarApi = google.calendar({ version: "v3", auth: authClient });
+    tasksApi = google.tasks({ version: "v1", auth: authClient });
+  }
+}
 
 let guardrails: GuardrailContext;
 try {
@@ -40,7 +55,7 @@ try {
 
 const audit = createAuditLogger(config.auditLogDir);
 
-if (!googleClient) {
+if (!calendarApi || !tasksApi) {
   console.error(
     "[mcp] No credentials found. All tools will return AUTH_MISSING. Run 'node auth.js' to set up.",
   );
@@ -48,7 +63,7 @@ if (!googleClient) {
 
 // --- Helper: auth gate for all tools ---
 function requireAuth() {
-  if (!googleClient) {
+  if (!calendarApi || !tasksApi) {
     return errorResult({
       error: true,
       code: "AUTH_MISSING",
@@ -70,7 +85,7 @@ server.tool(
   async () => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.listCalendars(googleClient!);
+    return cal.listCalendars(calendarApi!);
   },
 );
 
@@ -87,7 +102,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.listEvents(params, googleClient!, config);
+    return cal.listEvents(params, calendarApi!, config);
   },
 );
 
@@ -101,7 +116,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.getEvent(params, googleClient!, config);
+    return cal.getEvent(params, calendarApi!, config);
   },
 );
 
@@ -120,7 +135,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.createEvent(params, googleClient!, config, guardrails, audit);
+    return cal.createEvent(params, calendarApi!, config, guardrails, audit);
   },
 );
 
@@ -140,7 +155,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.updateEvent(params, googleClient!, config, guardrails, audit);
+    return cal.updateEvent(params, calendarApi!, config, guardrails, audit);
   },
 );
 
@@ -154,7 +169,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return cal.deleteEvent(params, googleClient!, guardrails, audit);
+    return cal.deleteEvent(params, calendarApi!, guardrails, audit);
   },
 );
 
@@ -169,7 +184,7 @@ server.tool(
   async () => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.listTaskLists(googleClient!);
+    return tasks.listTaskLists(tasksApi!);
   },
 );
 
@@ -184,7 +199,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.listTasks(params, googleClient!);
+    return tasks.listTasks(params, tasksApi!);
   },
 );
 
@@ -198,7 +213,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.getTask(params, googleClient!);
+    return tasks.getTask(params, tasksApi!);
   },
 );
 
@@ -214,7 +229,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.createTask(params, googleClient!, guardrails, audit);
+    return tasks.createTask(params, tasksApi!, guardrails, audit);
   },
 );
 
@@ -232,7 +247,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.updateTask(params, googleClient!, guardrails, audit);
+    return tasks.updateTask(params, tasksApi!, guardrails, audit);
   },
 );
 
@@ -246,7 +261,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.deleteTask(params, googleClient!, guardrails, audit);
+    return tasks.deleteTask(params, tasksApi!, guardrails, audit);
   },
 );
 
@@ -260,7 +275,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.completeTask(params, googleClient!, guardrails, audit);
+    return tasks.completeTask(params, tasksApi!, guardrails, audit);
   },
 );
 
@@ -275,7 +290,7 @@ server.tool(
   async (params) => {
     const authErr = requireAuth();
     if (authErr) return authErr;
-    return tasks.moveTask(params, googleClient!, guardrails, audit);
+    return tasks.moveTask(params, tasksApi!, guardrails, audit);
   },
 );
 
