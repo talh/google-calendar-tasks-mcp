@@ -1,13 +1,13 @@
 # google-calendar-tasks-mcp
 
-MCP server for Google Calendar and Google Tasks with safety guardrails.
+MCP server for Google Calendar, Google Tasks, and Gmail with safety guardrails.
 
 Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and any MCP-compatible client.
 
 ## Features
 
-- **14 tools**: full CRUD for calendar events and tasks
-- **Safety guardrails**: daily write limits, protected calendars/task lists, past-event protection, recurring series protection
+- **21 tools**: full CRUD for calendar events, tasks, and Gmail messages
+- **Safety guardrails**: daily write limits, protected calendars/task lists, past-event protection, recurring series protection, Gmail send approval
 - **Optional audit logging**: monthly JSON files tracking all write operations
 - **Cross-platform**: Windows, macOS, Linux
 - **Configurable** via environment variables and `guardrails.json`
@@ -16,7 +16,7 @@ Built for use with [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 ## Prerequisites
 
 - Node.js 18+
-- A Google Cloud project with Calendar and Tasks APIs enabled
+- A Google Cloud project with Calendar, Tasks, and Gmail APIs enabled
 - An OAuth 2.0 client ID (type: Desktop)
 
 ## Quick Start
@@ -46,13 +46,15 @@ npm run inspect
    - Search for "Google Calendar API" and enable it
 4. Enable the **Google Tasks API**:
    - Search for "Google Tasks API" and enable it
-5. Configure the **OAuth consent screen**:
+5. Enable the **Gmail API**:
+   - Search for "Gmail API" and enable it
+6. Configure the **OAuth consent screen**:
    - Navigate to APIs & Services > OAuth consent screen
    - Choose "External" user type
    - Fill in the required fields (app name, support email)
-   - Add scopes: `calendar.events` and `tasks`
+   - Add scopes: `calendar.events`, `tasks`, and `gmail.modify`
    - Add yourself as a test user
-6. Create **OAuth 2.0 credentials**:
+7. Create **OAuth 2.0 credentials**:
    - Navigate to APIs & Services > Credentials
    - Click "Create Credentials" > "OAuth client ID"
    - Choose "Desktop app" as the application type
@@ -254,6 +256,82 @@ Move a task to a different list. Counts as 2 write operations (create + delete).
 | `taskId` | string | Yes | Google task ID |
 | `destinationListId` | string | Yes | Destination task list ID |
 
+### Gmail Tools
+
+#### `gmail_list_messages`
+
+Search and list email messages.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | No | Gmail search query (same syntax as Gmail search bar, e.g., `is:unread`, `from:sender@email.com`) |
+| `labelIds` | string[] | No | Filter by label IDs (e.g., `["INBOX", "UNREAD"]`) |
+| `maxResults` | number | No | Max messages to return (1-100, default 20) |
+
+#### `gmail_get_message`
+
+Get the full content of a single email.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `messageId` | string | Yes | Gmail message ID |
+| `format` | string | No | `"full"` (default), `"metadata"`, or `"minimal"` |
+
+#### `gmail_get_attachment`
+
+Download a specific attachment from an email.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `messageId` | string | Yes | Gmail message ID |
+| `attachmentId` | string | Yes | Attachment ID from `gmail_get_message` response |
+
+#### `gmail_modify_message`
+
+Add or remove labels from an email. Remove `INBOX` to archive. Add `TRASH` to trash.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `messageId` | string | Yes | Gmail message ID |
+| `addLabelIds` | string[] | No | Label IDs to add |
+| `removeLabelIds` | string[] | No | Label IDs to remove |
+
+Subject to guardrails.
+
+#### `gmail_list_labels`
+
+List all Gmail labels (system and user-created).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| *(none)* | | | |
+
+#### `gmail_create_label`
+
+Create a new Gmail label.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Label name. Use `/` for nesting (e.g., `DPA/Processed`) |
+| `labelListVisibility` | string | No | `"labelShow"` (default), `"labelShowIfUnread"`, or `"labelHide"` |
+
+Subject to guardrails.
+
+#### `gmail_send_message`
+
+Send an email (reply or new). **Requires explicit approval** — `requireApproval` must be `true`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `to` | string | Yes | Recipient email address |
+| `subject` | string | Yes | Email subject |
+| `body` | string | Yes | Email body (plain text) |
+| `requireApproval` | boolean | Yes | Must be `true` — confirms user explicitly approved sending |
+| `threadId` | string | No | Gmail thread ID for threading replies |
+| `inReplyTo` | string | No | Message-ID header of the email being replied to |
+
+Subject to guardrails. The `requireApproval: true` flag is enforced by the server — calls without it are rejected.
+
 ## Configuration
 
 ### Environment Variables
@@ -276,7 +354,11 @@ Create or edit `guardrails.json` in the server directory:
   "pastEventProtectionDays": 7,
   "protectedCalendars": [],
   "protectedTaskLists": [],
-  "allowRecurringSeriesDelete": false
+  "allowRecurringSeriesDelete": false,
+  "gmail": {
+    "sendRequiresApproval": true,
+    "maxSendsPerDay": 10
+  }
 }
 ```
 
@@ -287,6 +369,8 @@ Create or edit `guardrails.json` in the server directory:
 | `protectedCalendars` | `[]` | Calendar IDs that cannot be written to |
 | `protectedTaskLists` | `[]` | Task list IDs that cannot be written to |
 | `allowRecurringSeriesDelete` | `false` | Allow deleting an entire recurring event series |
+| `gmail.sendRequiresApproval` | `true` | Require `requireApproval: true` flag on send |
+| `gmail.maxSendsPerDay` | 10 | Max emails that can be sent per UTC day |
 
 ### Audit Logging
 
