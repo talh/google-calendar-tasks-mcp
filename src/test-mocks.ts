@@ -163,6 +163,128 @@ export function createMockTasksClient() {
   };
 }
 
+export function createMockGmailClient() {
+  return {
+    users: {
+      messages: {
+        list: async (params: any) => ({
+          data: {
+            messages: [
+              { id: "msg_mock_1", threadId: "thread_mock_1" },
+              { id: "msg_mock_2", threadId: "thread_mock_2" },
+              { id: "msg_mock_3", threadId: "thread_mock_3" },
+            ],
+            resultSizeEstimate: 3,
+          },
+        }),
+        get: async (params: any) => ({
+          data: {
+            id: params.id ?? "msg_mock_1",
+            threadId: "thread_mock_1",
+            labelIds: ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+            snippet: "Your order has been shipped and is on its way...",
+            payload: {
+              headers: [
+                { name: "From", value: "orders@temu.com" },
+                { name: "To", value: "tal@example.com" },
+                { name: "Subject", value: "Your Temu order has shipped!" },
+                { name: "Date", value: "Thu, 19 Feb 2026 08:30:00 +0000" },
+                { name: "Message-ID", value: "<abc123@mail.temu.com>" },
+                { name: "In-Reply-To", value: "" },
+                { name: "List-Unsubscribe", value: "<mailto:unsub@temu.com>" },
+              ],
+              mimeType: "multipart/alternative",
+              parts: [
+                {
+                  mimeType: "text/plain",
+                  body: {
+                    data: Buffer.from(
+                      "Dear customer, your order #PO2026-789456 has been shipped. " +
+                      "Tracking number: IL123456789CN. Expected delivery: Feb 22, 2026.",
+                    ).toString("base64url"),
+                  },
+                },
+                {
+                  mimeType: "text/html",
+                  body: {
+                    data: Buffer.from(
+                      "<html><body><p>Dear customer, your order has been shipped.</p></body></html>",
+                    ).toString("base64url"),
+                  },
+                },
+              ],
+            },
+            internalDate: "1740991800000",
+          },
+        }),
+        modify: async (params: any) => ({
+          data: {
+            id: params.id ?? "msg_mock_1",
+            threadId: "thread_mock_1",
+            labelIds: (() => {
+              let labels = ["INBOX", "UNREAD", "CATEGORY_UPDATES"];
+              if (params.requestBody?.removeLabelIds) {
+                labels = labels.filter(
+                  (l: string) => !params.requestBody.removeLabelIds.includes(l),
+                );
+              }
+              if (params.requestBody?.addLabelIds) {
+                labels.push(...params.requestBody.addLabelIds);
+              }
+              return labels;
+            })(),
+          },
+        }),
+        send: async (params: any) => {
+          const id = nextId("msg");
+          return {
+            data: {
+              id,
+              threadId: params.requestBody?.threadId ?? nextId("thread"),
+              labelIds: ["SENT"],
+            },
+          };
+        },
+        attachments: {
+          get: async (params: any) => ({
+            data: {
+              data: Buffer.from("mock PDF content for testing").toString("base64url"),
+              size: 28,
+            },
+          }),
+        },
+      },
+      labels: {
+        list: async () => ({
+          data: {
+            labels: [
+              { id: "INBOX", name: "INBOX", type: "system" },
+              { id: "SENT", name: "SENT", type: "system" },
+              { id: "TRASH", name: "TRASH", type: "system" },
+              { id: "UNREAD", name: "UNREAD", type: "system" },
+              { id: "CATEGORY_UPDATES", name: "CATEGORY_UPDATES", type: "system" },
+              { id: "Label_100", name: "DPA/Expense", type: "user" },
+              { id: "Label_101", name: "DPA/Content-Scout", type: "user" },
+              { id: "Label_102", name: "DPA/Processed", type: "user" },
+            ],
+          },
+        }),
+        create: async (params: any) => {
+          const id = nextId("Label");
+          return {
+            data: {
+              id,
+              name: params.requestBody?.name ?? "DPA/Test",
+              type: "user",
+              labelListVisibility: params.requestBody?.labelListVisibility ?? "labelShow",
+            },
+          };
+        },
+      },
+    },
+  };
+}
+
 /** Reset the ID counter between test runs */
 export function resetMockState(): void {
   insertCounter = 0;

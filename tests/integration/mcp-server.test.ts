@@ -42,7 +42,7 @@ afterAll(async () => {
 // ============================================================
 
 describe("tool discovery", () => {
-  it("lists all 14 tools", async () => {
+  it("lists all 21 tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
@@ -52,6 +52,13 @@ describe("tool discovery", () => {
       "calendar_list_calendars",
       "calendar_list_events",
       "calendar_update_event",
+      "gmail_create_label",
+      "gmail_get_attachment",
+      "gmail_get_message",
+      "gmail_list_labels",
+      "gmail_list_messages",
+      "gmail_modify_message",
+      "gmail_send_message",
       "tasks_complete",
       "tasks_create",
       "tasks_delete",

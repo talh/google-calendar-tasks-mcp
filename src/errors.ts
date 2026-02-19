@@ -7,7 +7,11 @@ export type ErrorCode =
   | "AUTH_MISSING"
   | "NOT_FOUND"
   | "VALIDATION_ERROR"
-  | "API_ERROR";
+  | "API_ERROR"
+  | "SEND_NOT_APPROVED"
+  | "SEND_LIMIT_REACHED"
+  | "ATTACHMENT_TOO_LARGE"
+  | "BLOCKED_ATTACHMENT_TYPE";
 
 export interface StructuredError {
   error: true;

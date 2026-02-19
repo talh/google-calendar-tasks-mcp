@@ -135,10 +135,30 @@ async function withErrorHandling(
 // Date helpers
 // ============================================================
 
-function dayBounds(date: string, _timezone: string) {
+function getUtcOffset(date: string, timezone: string): string {
+  const dt = new Date(`${date}T12:00:00Z`);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    timeZoneName: "shortOffset",
+  }).formatToParts(dt);
+  const tzPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  // tzPart is like "GMT+2" or "GMT-5:30" or "GMT"
+  const match = tzPart.match(/GMT([+-]\d{1,2}(?::?\d{2})?)?$/);
+  if (!match || !match[1]) return "+00:00";
+  const raw = match[1];
+  // Normalize to ±HH:MM
+  const [h, m] = raw.includes(":") ? raw.split(":") : [raw, "00"];
+  const sign = h![0] === "-" ? "-" : "+";
+  const hours = Math.abs(parseInt(h!, 10)).toString().padStart(2, "0");
+  const minutes = (m ?? "00").padStart(2, "0");
+  return `${sign}${hours}:${minutes}`;
+}
+
+function dayBounds(date: string, timezone: string) {
+  const offset = getUtcOffset(date, timezone);
   return {
-    timeMin: `${date}T00:00:00`,
-    timeMax: `${date}T23:59:59`,
+    timeMin: `${date}T00:00:00${offset}`,
+    timeMax: `${date}T23:59:59${offset}`,
   };
 }
 
@@ -185,8 +205,10 @@ export async function listEvents(
       timeMin = bounds.timeMin;
       timeMax = bounds.timeMax;
     } else {
-      timeMin = `${params.startDate}T00:00:00`;
-      timeMax = `${params.endDate}T23:59:59`;
+      const startOffset = getUtcOffset(params.startDate!, config.timezone);
+      const endOffset = getUtcOffset(params.endDate!, config.timezone);
+      timeMin = `${params.startDate}T00:00:00${startOffset}`;
+      timeMax = `${params.endDate}T23:59:59${endOffset}`;
     }
 
     const { data } = await api.events.list({

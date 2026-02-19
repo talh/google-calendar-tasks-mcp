@@ -9,8 +9,10 @@ import { createAuditLogger } from "./audit.js";
 import { errorResult } from "./types.js";
 import * as cal from "./calendar.js";
 import * as tasks from "./tasks.js";
+import * as gmail from "./gmail.js";
 import type { CalendarApi } from "./calendar.js";
 import type { TasksApi } from "./tasks.js";
+import type { GmailApi } from "./gmail.js";
 import type { GuardrailContext } from "./guardrails.js";
 
 const config = loadConfig();
@@ -23,11 +25,13 @@ const server = new McpServer({
 // Load dependencies
 let calendarApi: CalendarApi | null = null;
 let tasksApi: TasksApi | null = null;
+let gmailApi: GmailApi | null = null;
 
 if (config.testMode) {
-  const { createMockCalendarClient, createMockTasksClient } = await import("./test-mocks.js");
+  const { createMockCalendarClient, createMockTasksClient, createMockGmailClient } = await import("./test-mocks.js");
   calendarApi = createMockCalendarClient();
   tasksApi = createMockTasksClient();
+  gmailApi = createMockGmailClient();
   console.error("[mcp] Running in TEST MODE with mock Google APIs");
 } else {
   const creds = await loadCredentials(config.credentialsPath);
@@ -35,6 +39,7 @@ if (config.testMode) {
     const authClient = createGoogleClient(creds, config.credentialsPath);
     calendarApi = google.calendar({ version: "v3", auth: authClient });
     tasksApi = google.tasks({ version: "v1", auth: authClient });
+    gmailApi = google.gmail({ version: "v1", auth: authClient });
   }
 }
 
@@ -55,7 +60,7 @@ try {
 
 const audit = createAuditLogger(config.auditLogDir);
 
-if (!calendarApi || !tasksApi) {
+if (!calendarApi || !tasksApi || !gmailApi) {
   console.error(
     "[mcp] No credentials found. All tools will return AUTH_MISSING. Run 'node auth.js' to set up.",
   );
@@ -63,7 +68,7 @@ if (!calendarApi || !tasksApi) {
 
 // --- Helper: auth gate for all tools ---
 function requireAuth() {
-  if (!calendarApi || !tasksApi) {
+  if (!calendarApi || !tasksApi || !gmailApi) {
     return errorResult({
       error: true,
       code: "AUTH_MISSING",
@@ -291,6 +296,123 @@ server.tool(
     const authErr = requireAuth();
     if (authErr) return authErr;
     return tasks.moveTask(params, tasksApi!, guardrails, audit);
+  },
+);
+
+// ============================================================
+// Gmail Tools
+// ============================================================
+
+server.tool(
+  "gmail_list_messages",
+  "Search and list email messages",
+  {
+    query: z.string().optional()
+      .describe("Gmail search query (same syntax as Gmail search bar). Examples: 'is:unread', 'from:sender@email.com', 'after:2026/02/19'"),
+    labelIds: z.array(z.string()).optional()
+      .describe("Filter by label IDs (e.g., ['INBOX', 'UNREAD'])"),
+    maxResults: z.number().int().min(1).max(100).optional().default(20)
+      .describe("Max messages to return"),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.listMessages(params, gmailApi!);
+  },
+);
+
+server.tool(
+  "gmail_get_message",
+  "Get the full content of a single email",
+  {
+    messageId: z.string().describe("Gmail message ID"),
+    format: z.enum(["full", "metadata", "minimal"]).optional().default("full")
+      .describe("Response format. 'full' includes body text, 'metadata' includes headers only"),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.getMessage(params, gmailApi!);
+  },
+);
+
+server.tool(
+  "gmail_get_attachment",
+  "Download a specific attachment from an email",
+  {
+    messageId: z.string().describe("Gmail message ID"),
+    attachmentId: z.string().describe("Attachment ID from gmail_get_message response"),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.getAttachment(params, gmailApi!, guardrails);
+  },
+);
+
+server.tool(
+  "gmail_modify_message",
+  "Add or remove labels from an email. Remove 'INBOX' to archive. Add 'TRASH' to trash.",
+  {
+    messageId: z.string().describe("Gmail message ID"),
+    addLabelIds: z.array(z.string()).optional()
+      .describe("Label IDs to add"),
+    removeLabelIds: z.array(z.string()).optional()
+      .describe("Label IDs to remove. Remove 'INBOX' to archive. Add 'TRASH' to trash."),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.modifyMessage(params, gmailApi!, guardrails, audit);
+  },
+);
+
+server.tool(
+  "gmail_list_labels",
+  "List all Gmail labels (system and user-created)",
+  {},
+  async () => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.listLabels(gmailApi!);
+  },
+);
+
+server.tool(
+  "gmail_create_label",
+  "Create a new Gmail label. Use '/' for nesting (e.g., 'DPA/Expense')",
+  {
+    name: z.string()
+      .describe("Label name. Use '/' for nesting (e.g., 'DPA/Expense')"),
+    labelListVisibility: z.enum(["labelShow", "labelShowIfUnread", "labelHide"])
+      .optional().default("labelShow")
+      .describe("Visibility in Gmail label list"),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.createLabel(params, gmailApi!, guardrails, audit);
+  },
+);
+
+server.tool(
+  "gmail_send_message",
+  "Send an email (reply or new). Requires explicit approval — requireApproval must be true.",
+  {
+    to: z.string().describe("Recipient email address"),
+    subject: z.string().describe("Email subject"),
+    body: z.string().describe("Email body (plain text)"),
+    inReplyTo: z.string().optional()
+      .describe("Message-ID header of the email being replied to (for threading)"),
+    threadId: z.string().optional()
+      .describe("Gmail thread ID to place reply in the correct thread"),
+    requireApproval: z.literal(true)
+      .describe("Must be true. Confirms the user explicitly approved sending this email."),
+  },
+  async (params) => {
+    const authErr = requireAuth();
+    if (authErr) return authErr;
+    return gmail.sendMessage(params, gmailApi!, guardrails, audit);
   },
 );
 

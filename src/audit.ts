@@ -3,7 +3,7 @@ import path from "node:path";
 
 export interface AuditEntry {
   operation: "create" | "update" | "delete" | "complete";
-  service: "calendar" | "tasks";
+  service: "calendar" | "tasks" | "gmail";
   title: string;
   googleId: string;
   changes?: Record<string, unknown>;

@@ -3,5 +3,17 @@
   "pastEventProtectionDays": 7,
   "protectedCalendars": [],
   "protectedTaskLists": [],
-  "allowRecurringSeriesDelete": false
+  "allowRecurringSeriesDelete": false,
+  "gmail": {
+    "dailySendLimit": 5,
+    "dailyModifyLimit": 100,
+    "maxAttachmentSizeMB": 10,
+    "blockedAttachmentTypes": [
+      "application/x-executable",
+      "application/x-msdos-program",
+      "application/x-msdownload",
+      "application/x-dosexec"
+    ],
+    "requireApprovalForSend": true
+  }
 }

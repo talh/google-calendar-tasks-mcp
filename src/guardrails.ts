@@ -1,17 +1,28 @@
 import fs from "node:fs";
 import { GuardrailError } from "./errors.js";
 
+export interface GmailGuardrailConfig {
+  dailySendLimit: number;
+  dailyModifyLimit: number;
+  maxAttachmentSizeMB: number;
+  blockedAttachmentTypes: string[];
+  requireApprovalForSend: boolean;
+}
+
 export interface GuardrailConfig {
   dailyWriteLimit: number;
   pastEventProtectionDays: number;
   protectedCalendars: string[];
   protectedTaskLists: string[];
   allowRecurringSeriesDelete: boolean;
+  gmail?: GmailGuardrailConfig;
 }
 
 export class GuardrailContext {
   private config: GuardrailConfig;
   private writeCount: number = 0;
+  private gmailSendCount: number = 0;
+  private gmailModifyCount: number = 0;
   private writeCountDate: string;
 
   constructor(config: GuardrailConfig) {
@@ -27,6 +38,8 @@ export class GuardrailContext {
     const today = this.todayUTC();
     if (this.writeCountDate !== today) {
       this.writeCount = 0;
+      this.gmailSendCount = 0;
+      this.gmailModifyCount = 0;
       this.writeCountDate = today;
     }
   }
@@ -94,6 +107,58 @@ export class GuardrailContext {
     }
   }
 
+  checkGmailSendLimit(cost: number = 1): void {
+    this.ensureDateCurrent();
+    const limit = this.config.gmail?.dailySendLimit ?? 5;
+    if (this.gmailSendCount + cost > limit) {
+      throw new GuardrailError(
+        "SEND_LIMIT_REACHED",
+        `Daily email send limit reached (${this.gmailSendCount}/${limit}). No more emails can be sent today.`,
+      );
+    }
+  }
+
+  checkGmailModifyLimit(cost: number = 1): void {
+    this.ensureDateCurrent();
+    const limit = this.config.gmail?.dailyModifyLimit ?? 100;
+    if (this.gmailModifyCount + cost > limit) {
+      throw new GuardrailError(
+        "DAILY_LIMIT_REACHED",
+        `Daily Gmail modify limit reached (${this.gmailModifyCount}/${limit}). No more label/archive/trash operations allowed today.`,
+      );
+    }
+  }
+
+  checkAttachmentSize(sizeBytes: number): void {
+    const limitMB = this.config.gmail?.maxAttachmentSizeMB ?? 10;
+    if (sizeBytes > limitMB * 1024 * 1024) {
+      throw new GuardrailError(
+        "ATTACHMENT_TOO_LARGE",
+        `Attachment exceeds ${limitMB}MB limit.`,
+      );
+    }
+  }
+
+  checkAttachmentType(mimeType: string): void {
+    const blocked = this.config.gmail?.blockedAttachmentTypes ?? [];
+    if (blocked.includes(mimeType)) {
+      throw new GuardrailError(
+        "BLOCKED_ATTACHMENT_TYPE",
+        `Attachment type '${mimeType}' is blocked for security.`,
+      );
+    }
+  }
+
+  incrementGmailSendCounter(cost: number = 1): void {
+    this.ensureDateCurrent();
+    this.gmailSendCount += cost;
+  }
+
+  incrementGmailModifyCounter(cost: number = 1): void {
+    this.ensureDateCurrent();
+    this.gmailModifyCount += cost;
+  }
+
   incrementWriteCounter(cost: number = 1): void {
     this.ensureDateCurrent();
     this.writeCount += cost;
@@ -110,6 +175,8 @@ export class GuardrailContext {
   /** Reset state for testing purposes */
   resetForTesting(): void {
     this.writeCount = 0;
+    this.gmailSendCount = 0;
+    this.gmailModifyCount = 0;
     this.writeCountDate = this.todayUTC();
   }
 

@@ -23,8 +23,9 @@ import { homedir, platform } from "node:os";
 import { OAuth2Client } from "google-auth-library";
 
 const SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/gmail.modify",
 ];
 const REDIRECT_URI = "http://localhost:3000/callback";
 const APP_NAME = "google-calendar-tasks-mcp";
